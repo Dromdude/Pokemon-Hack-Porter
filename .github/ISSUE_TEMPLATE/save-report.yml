@@ -1,0 +1,61 @@
+name: ROM hack request or problem report
+description: Request support for a new ROM hack, or report a Pokémon that exported wrong.
+title: "[Hack name]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! Save files are what make new hacks possible.
+        **Please never attach ROM files (.gba)** — only save files.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is this about?
+      options:
+        - Support for a new ROM hack
+        - A Pokémon exported wrong (species, moves, ability…)
+        - The program won't open my save
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: hack
+    attributes:
+      label: ROM hack name and version
+      description: The version is usually on the hack's download page or title screen.
+      placeholder: "e.g. Pokémon Unbound v2.1.1.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: pokemon
+    attributes:
+      label: What's in your party and PC boxes?
+      description: |
+        List each Pokémon with its level, and its box and slot if it's in the PC.
+        For problem reports, say what the game shows and what the program shows instead.
+      placeholder: |
+        Party: Starly Lv. 7, Chimchar Lv. 9
+        Box 1, slot 1: Bidoof Lv. 4
+        The game says Bidoof has Simple, the program says Unaware.
+    validations:
+      required: true
+
+  - type: textarea
+    id: save
+    attributes:
+      label: Your save file
+      description: |
+        Zip your `.sav` file first (GitHub doesn't accept .sav files directly), then drag the .zip into this box.
+        Save from the in-game menu before copying the file — emulator save states don't update the .sav.
+        Note: files attached here are public.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots or other details that might help.
