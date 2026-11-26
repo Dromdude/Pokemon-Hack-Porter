@@ -1,0 +1,72 @@
+# Builds ready-to-run downloads (Windows, macOS, Linux) every time a release
+# is published on GitHub, and attaches them to that release automatically.
+name: Build downloads
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+    inputs:
+      tag:
+        description: "Attach the downloads to this existing release tag (e.g. 1.0). Leave empty to just build."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+          - os: ubuntu-22.04
+            name: Linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --onefile --windowed --name "Pokemon-Hack-Porter" pokemon_hack_porter.py
+          Compress-Archive -Path "dist/Pokemon-Hack-Porter.exe" -DestinationPath "Pokemon-Hack-Porter-Windows.zip"
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --windowed --name "Pokemon Hack Porter" pokemon_hack_porter.py
+          ditto -c -k --keepParent "dist/Pokemon Hack Porter.app" "Pokemon-Hack-Porter-macOS.zip"
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --onefile --name "Pokemon-Hack-Porter" pokemon_hack_porter.py
+          tar -czf "Pokemon-Hack-Porter-Linux.tar.gz" -C dist "Pokemon-Hack-Porter"
+
+      - name: Attach to the release
+        if: github.event_name == 'release' || inputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" Pokemon-Hack-Porter-* --clobber
+
+      - name: Keep as a downloadable artifact (manual runs)
+        if: github.event_name != 'release' && inputs.tag == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pokemon-Hack-Porter-${{ matrix.name }}
+          path: Pokemon-Hack-Porter-*
