@@ -6,6 +6,8 @@ Open a save from a supported ROM hack, tick the Pokémon you want from your part
 
 > **AI disclaimer:** This program, including its code and this description, was made entirely with AI (Anthropic's Claude). It has been tested on real save files, but it may contain mistakes. Back up your saves, and please report anything that looks wrong.
 
+![Pokémon Hack Porter with a Lazarus save open](docs/screenshot.png)
+
 ---
 
 ## Supported ROM hacks
@@ -19,7 +21,11 @@ Open a save from a supported ROM hack, tick the Pokémon you want from your part
 | Pokémon Gaia (v3.2) | ✅ | ✅ | Poké Balls are exported as regular Poké Balls |
 | Pokémon Light Platinum | ✅ | ✅ | Load the hack's ROM for reliable results |
 
-Other versions may work but haven't been tested. More hacks are planned.
+**Testing has been limited.** For each hack, I only played long enough to catch a few Pokémon to put in the party and PC boxes, then checked that the program read them correctly. Things that only appear later in a game — rare forms, late-game moves, special events — haven't been checked. Other versions of these hacks may work but haven't been tested.
+
+## Help expand and test it
+
+Want your favourite ROM hack supported, or more testing on the ones above? **[Send me your save file](../../issues/new/choose)** — the form asks for the hack name and version, what's in your party and boxes, and the zipped `.sav`. Save files are all that's needed to add a new hack. Please never send ROMs.
 
 ## Download
 
@@ -70,7 +76,7 @@ ROM hack Pokémon will **never pass legality checks**. They're fine for single-p
 ## Troubleshooting
 
 - **"Couldn't find an intact save"** — save from the in-game menu; emulator save states don't update the `.sav` file.
-- **Wrong species or ability, or your hack isn't supported** — open an **[Issue](../../issues)** with the hack name, version and your save file (zipped). Never attach ROMs.
+- **Wrong species or ability, or your hack isn't supported** — fill in the **[save file form](../../issues/new/choose)**.
 
 ## Credits & license
 
