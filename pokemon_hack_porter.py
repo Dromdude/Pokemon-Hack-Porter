@@ -1483,7 +1483,86 @@ def find_base_stats(rom, idx_to_nat=None):
     del STATS_DIAG[:]
     STATS_DIAG.append("size %d" % len(rom))
     found = _find_by_nidoran(rom, idx_to_nat) + _find_by_bulbasaur(rom, idx_to_nat)
+    if not found:
+        found = _find_by_names(rom, idx_to_nat)
     return max(found, key=lambda f: f[:2])[2] if found else None
+
+
+def _learn_field(rom, base, stride, pairs, field, offsets):
+    """Find the byte (offset from base) that behaves like the official gender
+    ratio (field 0) or growth rate (field 1) whatever its encoding: Pokemon with
+    the same official value share one value there, different ones differ.
+    -> (offset, {stored value: official value}) or None."""
+    from collections import Counter
+    results = []
+    for k in offsets:
+        by_official = {}
+        for i, n in pairs:
+            by_official.setdefault(UU[n][field], Counter())[rom[base + i * stride + k]] += 1
+        if len(by_official) < 4:
+            continue
+        top = {off: c.most_common(1)[0] for off, c in by_official.items()}
+        consistent = sum(cnt for _, cnt in top.values())
+        values = [v for v, _ in top.values()]
+        if len(set(values)) != len(values):       # two official values stored the same way
+            continue
+        results.append((consistent, k, {v: off for off, (v, _) in top.items()}))
+    results.sort(key=lambda r: -r[0])
+    if not results:
+        STATS_DIAG.append("%s none" % "gr"[field])
+        return None
+    best = results[0]
+    second = results[1][0] if len(results) > 1 else 0
+    STATS_DIAG.append("%s %d:%d/%d/%d" % ("gr"[field], best[1], best[0], second, len(pairs)))
+    if best[0] < 0.85 * len(pairs) or best[0] - second < 0.1 * len(pairs):
+        return None
+    return best[1], best[2]
+
+
+def _find_by_names(rom, idx_to_nat):
+    """pokeemerald-expansion keeps each Pokemon's name inside its record, so the
+    distance between "Bulbasaur", "Ivysaur" and "Venusaur" is the record size."""
+    out = []
+    for case in (str, str.upper):
+        names = [g3_encode(case(n), len(n)) + b"\xFF" for n in ("Bulbasaur", "Ivysaur", "Venusaur")]
+        STATS_DIAG.append("%s x%d" % ("Bulbasaur" if case is str else "BULBASAUR", rom.count(names[0])))
+        pos = rom.find(names[0])
+        while pos != -1:
+            for stride in range(24, MAX_RECORD + 1):
+                if rom[pos + stride: pos + stride + len(names[1])] == names[1] and \
+                        rom[pos + 2 * stride: pos + 2 * stride + len(names[2])] == names[2]:
+                    base = pos - stride            # name position of record 0
+                    STATS_DIAG.append("names %X/%d" % (base, stride))
+                    table = _learned_table(rom, base, stride, idx_to_nat)
+                    if table:
+                        out.append((True, len(table), table))
+            pos = rom.find(names[0], pos + 1)
+    return out
+
+
+def _learned_table(rom, base, stride, idx_to_nat):
+    pairs = [(i, (idx_to_nat or {}).get(i, i if not idx_to_nat else None)) for i in range(1, 252)]
+    pairs = [(i, n) for i, n in pairs if n and n <= 809]
+    lo = max(-stride + 1, -base)
+    if base + 253 * stride > len(rom):
+        return None
+    offsets = [k for k in range(lo, stride) if not 0 <= k < 13]      # skip the name itself
+    g = _learn_field(rom, base, stride, pairs, 0, offsets)
+    r = _learn_field(rom, base, stride, pairs, 1, offsets)
+    if not g or not r:
+        return None
+    (gk, gmap), (rk, rmap) = g, r
+    table = {}
+    for i in range(1, 3000):
+        o = base + i * stride
+        if o + max(gk, rk) >= len(rom) or o + min(gk, rk) < 0:
+            break
+        gv, rv = rom[o + gk], rom[o + rk]
+        name = rom[o:o + 13]
+        named = 0xBB <= name[0] <= 0xEE and 0xFF in name          # a real record has a name
+        if named and rv in rmap and gv in gmap:
+            table[i] = (gmap[gv], rmap[rv])
+    return table
 
 
 def _nat_index(idx_to_nat, nat):
@@ -1524,7 +1603,7 @@ def _find_by_nidoran(rom, idx_to_nat):
 
 def _find_by_bulbasaur(rom, idx_to_nat):
     bulba, ivy, venu = BASE_STATS_START
-    STATS_DIAG.append("Bulbasaur x%d" % rom.count(bulba))
+    STATS_DIAG.append("stats x%d" % rom.count(bulba))
     out = []
     pos = rom.find(bulba)
     while pos != -1:
