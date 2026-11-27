@@ -45,6 +45,7 @@ Record the answer in this file (see "Known ROM layouts") and add a stand-in ROM 
 | `tools/build.py` | Embeds `data.json` into the source and writes `pokemon_hack_porter.py`. |
 | `tools/make_synthetic_save.py` | Writes Gen 8/9 edge cases into a Lazarus save (`tests/saves/synthetic_gen89.sav`). |
 | `tools/make_standin_roms.py` | Stand-in ROMs (random bytes + a species table in a given layout) for testing Load ROM without real ROMs. |
+| `tools/rom_data_export.py` | Developer-only tool (not in the releases): reads a hack's ROM with the porter's ROM reader and writes `<rom>_romdata.csv` with each Pokémon's gender ratio and growth rate (numbers only). Double-click and pick ROMs, or pass paths. Used to build per-hack data into the porter so the ROM isn't needed. |
 | `tests/check_rom_standins.py` | Builds the stand-in ROMs and checks Load ROM gives the in-game results. |
 | `tests/saves/` | Real saves from the owner's playthroughs (one per hack) + synthetic saves. |
 | `tests/expected.py` | **Ground truth**: every Pokémon in the saves as shown on in-game summary screens. |
@@ -110,6 +111,9 @@ All six hacks: species, level, gender, nature, moves, PP, met level, OT/ID and b
 
 ## Releases
 Version string: `VERSION` in the source. Publish a GitHub release with the tag (e.g. `1.2`) → the workflow builds and attaches `Pokemon-Hack-Porter-{Windows.zip,macOS.zip,Linux.tar.gz}`. Test builds: Actions → Build downloads → Run workflow (pick a branch) → artifacts.
+
+### Built-in hack data (planned)
+Goal: genders and levels right without loading the ROM. Nick runs `tools/rom_data_export.py` on each hack ROM and sends the CSVs; only the entries that differ from official data get built into the porter, per hack version (identify the version by the save profile; the CSV header has the ROM size and CRC32). A loaded ROM still takes priority over built-in data.
 
 ## Ideas not done yet
 - Try Load ROM with the other hacks' real ROMs.
