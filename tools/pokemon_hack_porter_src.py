@@ -63,7 +63,7 @@ import sys
 import zlib
 
 APP_NAME = "Pokémon Hack Porter"
-VERSION = "1.1.3"
+VERSION = "1.2"
 
 # Reference data: species/move/ability names, official base data and the
 # ROM-hack-to-official ID tables. Built from PKHeX and pokeemerald-expansion
@@ -753,6 +753,18 @@ def _read_stats_table(rom, start, stride, idx_to_nat, gender_at=None):
     return table
 
 
+def stats_agreement(stats, idx_to_nat=None):
+    """How many Gen 1-2 Pokemon have the official gender ratio and growth rate in
+    the ROM data: (matching, compared). Real hacks change only a few."""
+    agree = total = 0
+    for i in range(1, 252):
+        n = (idx_to_nat or {}).get(i, i if not idx_to_nat else None)
+        if n and n <= 809 and i in stats:
+            total += 1
+            agree += tuple(stats[i]) == (UU[n][0], UU[n][1])
+    return agree, total
+
+
 class RomTables:
     """Data read from a hack's ROM file: the species data table (gender odds and
     level-up rates the hack really uses) and, for hacks that reuse Pokemon
@@ -772,10 +784,22 @@ class RomTables:
         self.species_names = dict(enumerate(sp or []))
         self.moves = {i: name_to_id(n, MOVES_BY_NAME, MOVE_ALIASES) for i, n in enumerate(mv or [])}
         self.stats = find_base_stats(rom, self.species if (need_names and sp) else None)
+        self.rejected = None
+        if self.stats:
+            agree, total = stats_agreement(self.stats, self.species if (need_names and sp) else None)
+            if total < 50 or agree < 0.75 * total:
+                # a real hack changes a few Pokemon; mostly-different data means it was misread
+                self.rejected = (agree, total)
+                self.stats = None
         if (need_names and not sp) or not (sp or self.stats):
             raise ExportError("Couldn't find the Pokémon data in this file.\n"
                               "Make sure it's the patched ROM (.gba) of the hack you're playing.\n\n"
                               "Details (for a bug report): " + "; ".join(STATS_DIAG[:8]))
+        if self.rejected and not sp:
+            raise ExportError("The Pokémon data found in this ROM doesn't look right (only %d of %d "
+                              "Pokémon match the official games), so it can't be used.\n\n"
+                              "You can still set a Pokémon's gender or level by clicking it in the list.\n\n"
+                              "Details (for a bug report): %s" % (self.rejected + ("; ".join(STATS_DIAG[:8]),)))
         parts = []
         if need_names:
             parts.append("%d Pokémon names and %d move names" % (len(sp), len(mv or [])))
@@ -1056,9 +1080,10 @@ def reroll_pid(pid, otid, want, ratio, shiny):
 class Entry:
     """One Pokemon from a save, plus everything worked out for exporting it."""
 
-    def __init__(self, where, party, mon, profile, keep_balls=False):
+    def __init__(self, where, party, mon, profile, keep_balls=False, gender=None, level=None):
         self.where, self.party, self.m, self.profile = where, party, mon, profile
         self.keep_balls = keep_balls
+        self.set_gender, self.set_level = gender, level      # set by the user to match the game
         self.notes, self.blocker = [], None
         self.format = None
         self._plan()
@@ -1150,6 +1175,12 @@ class Entry:
         if self.level is None and hack:
             self.level = level_for_exp(hack[1], m["exp"])
         self.hack_gender = gender_from_ratio(m["pid"], hack[0]) if hack else None
+        if self.set_level:
+            self.level = self.set_level
+            self.notes.append("level set to %d by you" % self.level)
+        if self.set_gender is not None:
+            self.hack_gender = self.set_gender
+            self.notes.append("gender set to %s by you" % ("male", "female")[self.set_gender])
         # format
         self.need = need
         gen = max(need.values())
@@ -1185,9 +1216,8 @@ class Entry:
             elif self.format == 3:
                 self.pid = reroll_pid(self.pid, m["otid"], want, ratio, self.shiny(8))
                 self.gender = want
-                self.notes.append("personality value adjusted so it stays %s (official %s have "
-                                  "different gender odds); nature and shininess unchanged"
-                                  % (sexes[want], SPECIES[nat]))
+                self.notes.append("personality value adjusted so it's %s in official games too; "
+                                  "nature and shininess unchanged" % sexes[want])
             else:
                 self.gender = want
         # ball
@@ -1482,7 +1512,7 @@ def save_settings(settings):
 
 def run_gui(initial=None):
     import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
+    from tkinter import ttk, filedialog, messagebox, simpledialog
 
     if sys.platform == "win32":
         try:   # sharp text on high-DPI screens; hide the console if we own it
@@ -1523,8 +1553,8 @@ def run_gui(initial=None):
     mid = ttk.Frame(root, padding=(10, 4))
     mid.pack(fill="both", expand=True)
     cols = ("sel", "where", "pokemon", "sex", "lv", "nature", "ability", "games", "fmt", "status")
-    heads = ("", "Location", "Pokémon", "", "Lv", "Nature", "Ability", "Can go to", "File", "Notes")
-    widths = (34, 130, 160, 28, 36, 76, 110, 80, 46, 230)
+    heads = ("", "Location", "Pokémon", "♂/♀", "Lv", "Nature", "Ability", "Can go to", "File", "Notes")
+    widths = (34, 130, 160, 40, 40, 76, 110, 80, 46, 210)
     tree = ttk.Treeview(mid, columns=cols, show="headings", selectmode="browse")
     for c, h, w in zip(cols, heads, widths):
         tree.heading(c, text=h)
@@ -1541,7 +1571,8 @@ def run_gui(initial=None):
     details = tk.Text(bottom, height=8, wrap="word", relief="solid", borderwidth=1,
                       font=("TkDefaultFont", 10))
     details.pack(fill="x")
-    details.insert("1.0", "Open a save to see its Pokémon. Click a row's box to tick or untick it.\n\n"
+    details.insert("1.0", "Open a save to see its Pokémon. Click a row's box to tick or untick it. "
+                   "If a gender or level doesn't match the game, click it to change it.\n\n"
                    "Supported ROM hacks:\n" + "\n".join("  • " + p.name for p in PROFILES))
     details.configure(state="disabled")
     opts = ttk.Frame(bottom, padding=(0, 6, 0, 0))
@@ -1626,7 +1657,9 @@ def run_gui(initial=None):
         export_btn.state(["!disabled"] if n else ["disabled"])
 
     def make_entries():
-        return [Entry(w, p, m, state["prof"], keep_balls.get()) for w, p, m in state["mons"]]
+        ov = state.setdefault("overrides", {})
+        return [Entry(w, p, m, state["prof"], keep_balls.get(), *ov.get(i, (None, None)))
+                for i, (w, p, m) in enumerate(state["mons"])]
 
     def render():
         entries = state["entries"]
@@ -1636,8 +1669,10 @@ def run_gui(initial=None):
             name = "%s (%s)" % (e.nickname, e.name) if getattr(e, "nicknamed", False) else e.name
             tags = ("blocked",) if not e.exportable else (("party",) if e.party else ())
             sex = getattr(e, "gender", getattr(e, "hack_gender", None))
+            mark = lambda changed: "*" if changed else ""
             tree.insert("", "end", iid=str(idx), tags=tags, values=(
-                "", e.where, name, {0: "♂", 1: "♀"}.get(sex, ""), e.level or "", NATURES[e.m["pid"] % 25] if e.m["checksum_ok"] and not e.m["egg"] else "",
+                "", e.where, name, {0: "♂", 1: "♀"}.get(sex, "") + mark(e.set_gender is not None),
+                ("%s%s" % (e.level, mark(e.set_level))) if e.level else "", NATURES[e.m["pid"] % 25] if e.m["checksum_ok"] and not e.m["egg"] else "",
                 ABILITIES[e.ability] if getattr(e, "ability", None) else "",
                 "Gen %d+" % e.min_gen if e.format else "",
                 ".pk%d" % e.format if e.format else "", note))
@@ -1701,14 +1736,15 @@ def run_gui(initial=None):
             return
         rom_btn.pack(side="left", padx=(6, 0), after=top.winfo_children()[0])
         rom_lbl.configure(text="ROM loaded ✓" if prof.rom else "No ROM")
-        state.update(mons=mons, prof=prof, path=path, checked=set())
+        state.update(mons=mons, prof=prof, path=path, checked=set(), overrides={})
         state["entries"] = entries = make_entries()
         render()
         file_lbl.configure(text="%s   ·   %s   ·   Trainer %s   ·   %d Pokémon" % (
             os.path.basename(path), prof.name, trainer, len(entries)), style="TLabel")
         select("party")
         msg = ("Loaded %d Pokémon. Party Pokémon are ticked; tick any box Pokémon you also want.\n"
-               "\"Can go to\" shows the oldest game generation each Pokémon can be moved into."
+               "\"Can go to\" shows the oldest game generation each Pokémon can be moved into.\n"
+               "If a gender (♂/♀) or level (Lv) doesn't match the game, click it to change it."
                % len(entries)) if entries else "No Pokémon found in this save."
         if prof.needs_rom and not prof.rom:
             msg += ("\n\n%s reuses Pokémon numbers, so the program needs the hack's ROM to identify "
@@ -1742,9 +1778,34 @@ def run_gui(initial=None):
         idx = int(row)
         e = state["entries"][idx]
         show_details(e.summary())
-        if tree.identify_column(event.x) == "#1" and e.exportable:
+        col = tree.identify_column(event.x)
+        if col == "#1" and e.exportable:
             state["checked"] ^= {idx}
             refresh()
+        elif col in ("#4", "#5") and e.exportable:
+            root.after(1, lambda: (set_gender if col == "#4" else set_level)(idx))
+
+    def set_gender(idx):
+        """Flip a Pokemon's gender to match what the game shows."""
+        e = state["entries"][idx]
+        ratio = base_data(e.nat, e.form, e.format)[0] if e.format != 3 else UU[e.nat][0]
+        if ratio in (0, 254, 255):
+            show_details(e.summary() + "\n\nOfficial %s are always %s, so the gender can't be changed."
+                         % (SPECIES[e.nat], {0: "male", 254: "female", 255: "genderless"}[ratio]))
+            return
+        g, lv = state["overrides"].get(idx, (None, None))
+        state["overrides"][idx] = (1 - e.gender, lv)
+        replan()
+
+    def set_level(idx):
+        """Set a Pokemon's level to match what the game shows."""
+        e = state["entries"][idx]
+        lv = simpledialog.askinteger(APP_NAME, "Level shown in the game for %s:" % e.name,
+                                     initialvalue=e.level, minvalue=1, maxvalue=100, parent=root)
+        if lv:
+            g, _ = state["overrides"].get(idx, (None, None))
+            state["overrides"][idx] = (g, lv)
+            replan()
 
     def on_key(event):
         sel = tree.selection()
@@ -1788,7 +1849,7 @@ def run_gui(initial=None):
 
 
 # =============================================================== text mode
-def run_text(path, boxes, out, keep_balls=False, rom=None, hack=None):
+def run_text(path, boxes, out, keep_balls=False, rom=None, hack=None, set_gender=(), set_level=()):
     if not path:
         path = input("Path to your save file: ").strip().strip('"').strip("'")
 
@@ -1818,7 +1879,16 @@ def run_text(path, boxes, out, keep_balls=False, rom=None, hack=None):
               "be identified reliably.\n" % prof.short)
     else:
         print("Tip: add --rom \"your hack.gba\" so genders and levels match the hack exactly.\n")
-    entries = [Entry(w, p, m, prof, keep_balls) for w, p, m in mons]
+    genders = {}
+    for item in set_gender:
+        where, _, g = item.rpartition("=")
+        genders[where.strip().lower()] = {"m": 0, "male": 0, "f": 1, "female": 1}[g.strip().lower()]
+    levels = {}
+    for item in set_level:
+        where, _, lv = item.rpartition("=")
+        levels[where.strip().lower()] = max(1, min(100, int(lv)))
+    entries = [Entry(w, p, m, prof, keep_balls, genders.get(w.lower()), levels.get(w.lower()))
+               for w, p, m in mons]
     print("%s %s\n%s - trainer %s\n" % (APP_NAME, VERSION, prof.name, trainer))
     if prof.custom_abilities:
         print("Note: %s changes some Pokémon's abilities. Exported Pokémon get the official\n"
@@ -1848,6 +1918,10 @@ def main():
                                   "needed to identify Light Platinum Pokemon)")
     ap.add_argument("--hack", help="text mode: which hack, if the save could be from several "
                                    "(e.g. --hack gaia)")
+    ap.add_argument("--set-gender", action="append", default=[], metavar='"WHERE=F"',
+                    help='text mode: set a gender to match the game, e.g. --set-gender "Party 4=F"')
+    ap.add_argument("--set-level", action="append", default=[], metavar='"WHERE=LV"',
+                    help='text mode: set a level to match the game, e.g. --set-level "BOX1, slot 2=5"')
     ap.add_argument("--keep-balls", action="store_true",
                     help="text mode: keep original Poke Balls, even if that limits a Pokemon to newer-generation games")
     args = ap.parse_args()
@@ -1859,7 +1933,8 @@ def main():
             args.text = True
     try:
         if args.text:
-            run_text(args.save, args.boxes, args.out, args.keep_balls, args.rom, args.hack)
+            run_text(args.save, args.boxes, args.out, args.keep_balls, args.rom, args.hack,
+                     args.set_gender, args.set_level)
         else:
             run_gui(args.save)
     except ExportError as err:

@@ -1,12 +1,12 @@
 # Developer notes
 
-Everything needed to keep working on Pokémon Hack Porter: how it's built, how each hack is read, what has been verified, and what's still open. Last updated for v1.1.3 (Nov 2026).
+Everything needed to keep working on Pokémon Hack Porter: how it's built, how each hack is read, what has been verified, and what's still open. Last updated for v1.2 (Nov 2026).
 
 ## How this project is worked on
 
 Two AI assistants work on this repository, coordinated by the owner (Nick):
 - **Claude** does the development: code, tests, builds, documentation, releases. Claude doesn't open ROM files.
-- **Grok** answers questions that need data straight from a ROM (offsets, record sizes, byte values). Grok found the Lazarus layout that fixed Load ROM in v1.1.3.
+- **Grok** answers questions that need data straight from a ROM (offsets, record sizes, byte values). Its answers get checked against official data and the owner's saves before anything is built in (lesson from the Lazarus reader, see below).
 
 Rules that keep it smooth:
 1. One assistant per task, each on its own branch; always start from the latest `main`.
@@ -77,26 +77,32 @@ Oldest format that holds all the data: ≤ Gen 3 → `.pk3`; ≤ 6 → `.pk6`; 7
 
 ## Load ROM (gender odds and level-up rates)
 
-Hacks can change a species' gender ratio and growth rate; the save doesn't say which, and in Gen 3 gender is computed from the PID with the species' ratio. `RomTables` → `find_base_stats()` looks for the hack's species table and returns `{hack species ID: (gender ratio, growth rate)}`. `_plan()` then keeps the hack's level (adjusting EXP to the official curve) and gender (stored directly in `.pk6`+; in `.pk3` the PID is re-rolled by `reroll_pid()` keeping nature and shininess).
+Hacks can change a species' gender ratio and growth rate; the save doesn't say which, and in Gen 3 gender is computed from the PID with the species' ratio.
+
+**Manual switches (v1.2, the main fix):** in the window, clicking a row's ♂/♀ flips its gender and clicking Lv asks for the level the game shows (`Entry(..., gender=, level=)`; text mode `--set-gender "Party 4=F"`, `--set-level "BOX1, slot 2=5"`). Changed values show `*` and a note. This works for every hack without any ROM data; Load ROM is a bonus where it works.
+
+**Safety check (v1.2):** `stats_agreement()` compares the ROM data with official gender ratio + growth rate for Pokémon #1–251. A real hack changes a few; if fewer than 75% match (or fewer than 50 can be compared), `RomTables` rejects the data (`self.rejected`) and says so, instead of producing wrong genders/levels. `RomTables` → `find_base_stats()` looks for the hack's species table and returns `{hack species ID: (gender ratio, growth rate)}`. `_plan()` then keeps the hack's level (adjusting EXP to the official curve) and gender (stored directly in `.pk6`+; in `.pk3` the PID is re-rolled by `reroll_pid()` keeping nature and shininess).
 
 Search methods, in order (`STATS_DIAG` collects what each saw; shown in the error and by `tests/check_saves.py`):
 1. `_find_by_nidoran` — gender bytes of #28–#35 one record apart: 127, 254×3, 0×3, 191. Growth offset learned from official data.
 2. `_find_by_bulbasaur` — Bulbasaur/Ivysaur/Venusaur base stats one record apart (record size 24–1024).
 3. `_find_by_names` — expansion keeps names inside records: "Bulbasaur", "Ivysaur", "Venusaur" one record apart. Gender/growth bytes and their encoding learned by behaviour (`_learn_field`).
-4. `_find_lazarus` (added by Grok, v1.1.3) — Lazarus's known layout, below. Only runs for 32 MB ROMs when the others find nothing; anchors on the names Fennekin, Pikachu, Caterpie, Eevee and Vulpix and walks records in both directions.
+4. `_find_lazarus` (added by Grok, v1.1.3) — turned out to misread the real ROM (see Lazarus status); kept, but its output fails the safety check. Only runs for 32 MB ROMs when the others find nothing; anchors on the names Fennekin, Pikachu, Caterpie, Eevee and Vulpix and walks records in both directions.
 
 Tested on stand-in ROMs (Gen 3 28-byte records; expansion records of 196, 304, 336, 348 and 424 bytes; percentage-encoded genders; permuted growth numbering) and works for those.
 
 ### Known ROM layouts
 | Hack | ROM size | Record size | Name | Gender ratio | Growth rate | Found by |
 |---|---|---|---|---|---|---|
-| Lazarus v2.0 | 33,554,432 | 424 bytes | at the start of the record (Gen 3 text, 0xFF-terminated) | +186 | +189 | Grok, from the real ROM |
+| Lazarus v2.0 | 33,554,432 | unknown | — | — | — | not found yet (Grok's 424-byte reading proved wrong, see below) |
 | pokeemerald-expansion (current) | varies | 196+ bytes (more with options) | inside the record | +0x12 in the default build | +0x15 | expansion source |
 | Gen 3 / CFRU / DPE (Gaia, Unbound, Odyssey, Light Platinum) | 16–32 MB | 28 bytes | separate table | +0x10 | +0x13 | standard layout |
 
-Lazarus history, in case a similar hack shows up: its ROM doesn't contain Bulbasaur's official base stats, and none of the general searches (1–3) found the table; the Details lines from the real ROM were `Bulbasaur x0`, then `FE x132100, nido x0, FE3 24:1533 32:1409 512:1262`. Grok then read the layout from the ROM (above) and added `_find_lazarus` in v1.1.3. `tests/check_rom_standins.py` covers it with a stand-in that defeats searches 1–3 like the real ROM.
+**Lazarus status: unsolved.** Its ROM doesn't contain Bulbasaur's official base stats, and none of the general searches (1–3) found the table (Details lines from the real ROM: `Bulbasaur x0`, then `FE x132100, nido x0, FE3 24:1533 32:1409 512:1262`). Grok's `_find_lazarus` (v1.1.3) anchors on names in 424-byte records, but checking its output (`tools/rom_data_export.py` on the real ROM, kept in `tests/data/lazarus_v2.0_misread_romdata.csv`) showed it misreads most species: only 71 of 135 Gen 1–2 Pokémon match official data, Magneton/Electrode read as always male, Murkrow reads male (in-game female), 65 entries hold the next species' values. The safety check rejects it, so it's effectively off.
 
-Real ROMs tried with Load ROM so far: Lazarus (works since 1.1.3). The others are untested with their real ROMs; if one fails, the Details line in the error says what the searches saw, and a ROM data request to Grok can fill in the layout.
+Follow-up attempts by Grok (no ARM disassembler available to it) didn't find the real table: the named 212-byte records aren't one table (offsets not multiples of 212 apart, Bulbasaur missing), and candidates found by matching a few values (#29 = 254, #32 = 0, #81 = 255 at strides 64–336) were random hits (Candidate A matched official data for 2 of 40 species; ~2,000 such hits are expected by chance in 32 MB). **To finish it:** disassemble the gender routine (`GetGenderFromSpeciesAndPersonality`, e.g. with Ghidra) and follow its table pointer. Any answer must pass these checks from the owner's save: #198 Murkrow female with personality byte 76 (ratio > 76, growth 3); #179 Mareep female, byte 4 (> 4, growth 3); #653 Fennekin female, byte 58 (> 58, growth 3); #37 Vulpix female, byte 73 (> 73); #285 Shroomish male, byte 177 (≤ 177, growth 2); #133 Eevee male, byte 166 (≤ 166). Until then, users fix Fennekin/Braixen's gender with the ♂/♀ switch.
+
+Real ROMs tried with Load ROM so far: Lazarus (not readable; rejected by the safety check). The others are untested with their real ROMs; if one fails, the Details line in the error says what the searches saw, and a ROM data request to Grok can fill in the layout.
 
 ## Testing
 
@@ -113,10 +119,11 @@ All six hacks: species, level, gender, nature, moves, PP, met level, OT/ID and b
 Version string: `VERSION` in the source. Publish a GitHub release with the tag (e.g. `1.2`) → the workflow builds and attaches `Pokemon-Hack-Porter-{Windows.zip,macOS.zip,Linux.tar.gz}`. Test builds: Actions → Build downloads → Run workflow (pick a branch) → artifacts.
 
 ### Built-in hack data (planned)
-Goal: genders and levels right without loading the ROM. Nick runs `tools/rom_data_export.py` on each hack ROM and sends the CSVs; only the entries that differ from official data get built into the porter, per hack version (identify the version by the save profile; the CSV header has the ROM size and CRC32). A loaded ROM still takes priority over built-in data.
+Only once a hack's ROM reads correctly (it must pass the safety check and the checks from saves). Goal: genders and levels right without loading the ROM. Nick runs `tools/rom_data_export.py` on each hack ROM and sends the CSVs; only the entries that differ from official data get built into the porter, per hack version (identify the version by the save profile; the CSV header has the ROM size and CRC32). A loaded ROM still takes priority over built-in data.
 
 ## Ideas not done yet
-- Try Load ROM with the other hacks' real ROMs.
+- Find Lazarus's real species table (checks above).
+- Try Load ROM with the other hacks' real ROMs (`tools/rom_data_export.py` + compare with official data).
 - Gaia ball numbering (needs a save with non-Poké Balls).
 - More hacks: Radical Red, Emerald Rogue, Inclement Emerald, Seaglass, Modern Emerald… (send saves via the issue form).
 - ROM-read hack abilities (currently the official ability for the slot).

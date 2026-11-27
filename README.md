@@ -42,11 +42,13 @@ You can also run `pokemon_hack_porter.py` directly with Python 3.8+.
 ## How to use
 
 1. Click **Open Save…** and pick your `.sav` file.
-2. Click **Load ROM…** and pick the hack's `.gba` file (recommended for every hack — see below).
-3. Tick the Pokémon you want (party Pokémon are ticked automatically). Click a row to see its details.
+2. Tick the Pokémon you want (party Pokémon are ticked automatically). Click a row to see its details.
+3. Check each Pokémon's gender (♂/♀) and level (Lv) against the game. If one doesn't match, click it to change it (see below).
 4. Click **Export Selected…** and choose a folder.
 
-**Why load the ROM?** Hacks can change a Pokémon's gender odds and how fast it levels up, and the save file alone doesn't say which. With the ROM loaded, every Pokémon keeps the gender and level the game shows. Without it, the official games' rules are used, so a Pokémon can come out as the other gender or a level lower. For Light Platinum, the ROM is also needed to identify Pokémon. The ROM is only read, never changed.
+**Why a gender or level might not match:** hacks can change a Pokémon's gender odds and how fast it levels up, and the save file alone doesn't say which. Without that information the program uses the official games' rules, so a Pokémon can come out as the other gender or, if it's in a box, a level lower. Click the ♂/♀ to flip it, or the level to type the one the game shows; changed values get a `*`. For `.pk3` files, the program adjusts the Pokémon's personality value to match the gender, keeping its nature and shininess.
+
+**Load ROM… (optional):** for some hacks, the program can read the gender odds and level-up speeds from the hack's `.gba` file and fix these automatically. If the data it finds doesn't look right, it ignores it and tells you. For Light Platinum, the ROM is also needed to identify Pokémon. The ROM is only read, never changed.
 
 - **Can go to** shows the oldest game generation each Pokémon can be moved into (e.g. *Gen 4+*).
 - **Keep original Poké Balls:** by default, a ball that doesn't exist in older games is swapped for a Poké Ball. Tick this to keep the original ball instead.

@@ -53,7 +53,8 @@ for sid, (nat, form, kind, label) in D["DPE"].items():
 open('standin_dpe.gba', 'wb').write(junk(4000) + table(ent, 28, 0x10, 0x13, 1300) + junk(2000))
 
 
-# 3) Lazarus v2.0 layout (found by Grok from the real ROM, Nov 2026): 32 MB ROM,
+# 3) The layout _find_lazarus expects (Grok, v1.1.3; it turned out NOT to be how the real
+#    Lazarus ROM stores this data - this only keeps that code path tested): 32 MB ROM,
 #    424-byte records starting with the Gen 3-encoded name, gender ratio at +186,
 #    growth rate at +189. Like the real ROM, the other searches must not find it:
 #    Bulbasaur's stats are changed, Bulbasaur's line has no names, and Sandslash's

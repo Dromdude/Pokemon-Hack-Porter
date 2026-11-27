@@ -43,5 +43,27 @@ for save, mons in EXPECTED.items():
                 bad.append('%s %s: got %r, game shows %r' % (tag, k, got, want))
                 fails += tag == 'FAIL'
         print('  %-14s %-16s %s' % (where, species, '; '.join(bad) or 'ok'))
+# Manual gender / level switches (what the window's ♂/♀ and Lv clicks do)
+print('== manual switches')
+for save, where, gender, level, want in (
+        ('lazarus.sav', 'Party 4', 1, None, ('F', 14)),          # Fennekin: female in-game
+        ('lazarus.sav', 'Party 3', 0, None, ('M', 13)),          # Mareep flipped to male (pk3 PID re-roll)
+        ('light_platinum.sav', 'BOX1, slot 2', None, 5, ('M', 5))):  # Bidoof: Lv 5 in-game
+    if only and save != only:
+        continue
+    pick = None
+    prof, trainer, raw = php.open_save(os.path.join(here, 'saves', save), pick)
+    prof.rom = None
+    e = next(php.Entry(w, p, m, prof, False, gender, level) for w, p, m in raw if w == where)
+    data = e.build()
+    got = ({0: 'M', 1: 'F'}[e.gender], e.level)
+    if e.format == 3:   # gender in a .pk3 comes from the personality value
+        pid = int.from_bytes(data[0:4], 'little')
+        got = ({0: 'M', 1: 'F'}[php.gender_from_ratio(pid, php.UU[e.nat][0])], e.level)
+        assert pid % 25 == e.m['pid'] % 25, 'nature changed'
+    good = got == want and php.level_for_exp(php.base_data(e.nat, e.form, e.format)[1] if e.format != 3
+                                             else php.G3GROW[e.nat], e.exp) == want[1]
+    print('  %-12s %-14s %s' % (save, where, 'ok' if good else 'FAIL got %r want %r' % (got, want)))
+    fails += not good
 print('\n%d failure(s)' % fails)
 sys.exit(1 if fails else 0)
