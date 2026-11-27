@@ -56,13 +56,14 @@ import base64
 import datetime
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
 import zlib
 
 APP_NAME = "Pokémon Hack Porter"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 # Reference data: species/move/ability names, official base data and the
 # ROM-hack-to-official ID tables. Built from PKHeX and pokeemerald-expansion
@@ -1467,18 +1468,59 @@ MAX_RECORD = 1024      # pokeemerald-expansion records grow with options like fo
 
 
 STATS_DIAG = []        # what the search saw, shown if it fails (helps fix new hacks)
+NIDO_FEMALE = re.compile(b"(?=\xFE[\x00-\xFF]{2}\x03)", re.S)   # always female, Medium Slow
 
 
 def find_base_stats(rom, idx_to_nat=None):
-    """Find the hack's species data table (base stats, gender odds, level-up rate)
-    and return {hack species number: (gender ratio, growth rate)}, or None.
-    Works for the original Gen 3 layout and for pokeemerald-expansion's bigger
-    records: the record size is found from Bulbasaur/Ivysaur/Venusaur, and the
-    positions of the two values by matching official data for many Pokemon."""
-    bulba, ivy, venu = BASE_STATS_START
-    found = []
+    """Find the hack's species data table and return
+    {hack species number: (gender ratio, growth rate)}, or None.
+    In both the original Gen 3 layout and pokeemerald-expansion's, each record has
+    gender ratio, egg cycles, friendship and growth rate as four bytes in a row.
+    The table is found from the Nidoran families, which hacks don't change: three
+    always-female then three always-male Pokemon, all Medium Slow, one record
+    apart. The record size and the stats-based search are fallbacks."""
     del STATS_DIAG[:]
-    STATS_DIAG.append("size %d, Bulbasaur x%d" % (len(rom), rom.count(bulba)))
+    STATS_DIAG.append("size %d" % len(rom))
+    found = _find_by_nidoran(rom, idx_to_nat) + _find_by_bulbasaur(rom, idx_to_nat)
+    return max(found, key=lambda f: f[:2])[2] if found else None
+
+
+def _nat_index(idx_to_nat, nat):
+    if not idx_to_nat:
+        return nat
+    hits = [i for i, n in idx_to_nat.items() if n == nat]
+    return hits[0] if hits else None
+
+
+def _find_by_nidoran(rom, idx_to_nat):
+    first = _nat_index(idx_to_nat, 29)
+    if first is None or [_nat_index(idx_to_nat, n) for n in range(29, 35)] != list(range(first, first + 6)):
+        return []
+    fem = sorted(m.start() for m in NIDO_FEMALE.finditer(rom))
+    fem_set = set(fem)
+    STATS_DIAG.append("female x%d" % len(fem))
+    out = []
+    import bisect
+    for a, p in enumerate(fem):
+        for q in fem[a + 1: bisect.bisect_right(fem, p + MAX_RECORD, a + 1)]:
+            stride = q - p
+            if stride < 24 or p + 2 * stride not in fem_set:
+                continue
+            if not all(rom[p + k * stride] == 0 and rom[p + k * stride + 3] == 3 for k in (3, 4, 5)):
+                continue
+            g0 = p - first * stride                # gender byte of record 0
+            STATS_DIAG.append("nido %X/%d" % (g0, stride))
+            table = _read_stats_table(rom, g0, stride, idx_to_nat, fixed=(0, 3))
+            if table:
+                used = any(struct.pack("<I", 0x08000000 + g0 - k) in rom for k in range(0x0C, 0x40))
+                out.append((used, len(table), table))
+    return out
+
+
+def _find_by_bulbasaur(rom, idx_to_nat):
+    bulba, ivy, venu = BASE_STATS_START
+    STATS_DIAG.append("Bulbasaur x%d" % rom.count(bulba))
+    out = []
     pos = rom.find(bulba)
     while pos != -1:
         for stride in range(24, MAX_RECORD + 1):
@@ -1492,18 +1534,23 @@ def find_base_stats(rom, idx_to_nat=None):
                     # hacks that enlarge the table often leave the old copy behind, unused:
                     # prefer a table the game's code points to, then the biggest one
                     used = struct.pack("<I", 0x08000000 + start) in rom
-                    found.append((used, len(table), table))
+                    out.append((used, len(table), table))
         pos = rom.find(bulba, pos + 1)
-    return max(found, key=lambda f: f[:2])[2] if found else None
+    return out
 
 
-def _read_stats_table(rom, start, stride, idx_to_nat):
+def _read_stats_table(rom, start, stride, idx_to_nat, fixed=None):
     pairs = [(i, (idx_to_nat or {}).get(i, i if not idx_to_nat else None)) for i in range(1, 252)]
     pairs = [(i, n) for i, n in pairs if n and n <= 809]
+    if start < 0 or start + 253 * stride > len(rom):
+        return None
     best = {}
     for field in (0, 1):                       # 0 = gender ratio, 1 = growth rate
         scores = []
-        for k in range(6, stride):
+        for k in ([fixed[field], -1] if fixed else range(6, stride)):
+            if k < 0:
+                scores.append((0, k))
+                continue
             hits = sum(1 for i, n in pairs if rom[start + i * stride + k] == UU[n][field])
             scores.append((hits, k))
         scores.sort(reverse=True)
@@ -1517,6 +1564,8 @@ def _read_stats_table(rom, start, stride, idx_to_nat):
     table = {}
     for i in range(1, min(count, 3000)):
         o = start + i * stride
+        if o + max(g, r) >= len(rom):
+            break
         rate = rom[o + r]
         if rate > 5:                           # past the end of the table
             break
