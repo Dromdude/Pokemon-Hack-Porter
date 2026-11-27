@@ -2,7 +2,7 @@
 
 **Export Pokémon from ROM hack saves as standard Pokémon files.**
 
-Open a save from a supported ROM hack, tick the Pokémon you want from your party and PC boxes, and export them as `.pk3`, `.pk6` or `.pk7` files. Your save file is only read, never changed.
+Open a save from a supported ROM hack, tick the Pokémon you want from your party and PC boxes, and export them as `.pk3`, `.pk6`, `.pk7`, `.pk8` or `.pk9` files. Your save file is only read, never changed.
 
 > **AI disclaimer:** This program, including its code and this description, was made entirely with AI (Anthropic's Claude). It has been tested on real save files, but it may contain mistakes. Back up your saves, and please report anything that looks wrong.
 
@@ -19,7 +19,7 @@ Open a save from a supported ROM hack, tick the Pokémon you want from your part
 | Pokémon Unbound (v2.1) | ✅ | ✅ | |
 | Pokémon Odyssey (v4.1) | ✅ | ✅ | |
 | Pokémon Gaia (v3.2) | ✅ | ✅ | Poké Balls are exported as regular Poké Balls |
-| Pokémon Light Platinum | ✅ | ✅ | Load the hack's ROM for reliable results |
+| Pokémon Light Platinum | ✅ | ✅ | Load the hack's ROM to identify every Pokémon |
 
 **Testing has been limited.** For each hack, I only played long enough to catch a few Pokémon to put in the party and PC boxes, then checked that the program read them correctly. Things that only appear later in a game — rare forms, late-game moves, special events — haven't been checked. Other versions of these hacks may work but haven't been tested.
 
@@ -42,12 +42,14 @@ You can also run `pokemon_hack_porter.py` directly with Python 3.8+.
 ## How to use
 
 1. Click **Open Save…** and pick your `.sav` file.
-2. Tick the Pokémon you want (party Pokémon are ticked automatically). Click a row to see its details.
-3. Click **Export Selected…** and choose a folder.
+2. Click **Load ROM…** and pick the hack's `.gba` file (recommended for every hack — see below).
+3. Tick the Pokémon you want (party Pokémon are ticked automatically). Click a row to see its details.
+4. Click **Export Selected…** and choose a folder.
+
+**Why load the ROM?** Hacks can change a Pokémon's gender odds and how fast it levels up, and the save file alone doesn't say which. With the ROM loaded, every Pokémon keeps the gender and level the game shows. Without it, the official games' rules are used, so a Pokémon can come out as the other gender or a level lower. For Light Platinum, the ROM is also needed to identify Pokémon. The ROM is only read, never changed.
 
 - **Can go to** shows the oldest game generation each Pokémon can be moved into (e.g. *Gen 4+*).
 - **Keep original Poké Balls:** by default, a ball that doesn't exist in older games is swapped for a Poké Ball. Tick this to keep the original ball instead.
-- **Light Platinum:** after opening your save, click **Load ROM…** and pick your Light Platinum `.gba` file so every Pokémon (nicknamed or not) is identified correctly.
 - **Odyssey and Gaia** saves look alike, so the program asks which game the save is from.
 
 ## Importing the files
@@ -57,7 +59,7 @@ The exported files work with any tool that reads standard Pokémon files, includ
 - **[OpenHome](https://github.com/andrewbenington/OpenHome)**
 - **[PKVault](https://github.com/Chnapy/PKVault)**
 - **[PKHeX](https://github.com/kwsch/PKHeX)**
-- **PKSM** (3DS homebrew)
+- **PKSM** (3DS homebrew, `.pk3`–`.pk7` only)
 
 From these, Pokémon can be moved into official games.
 
@@ -67,7 +69,8 @@ Species, nickname, Original Trainer, nature, gender, shininess, IVs, EVs, level,
 
 - **Held items** are dropped, and the met location becomes "traded".
 - **Abilities:** hacks often change abilities, so Pokémon get the official ability for the same slot.
-- **Hack-only Pokémon and forms**, **Gen 8+ Pokémon** and **eggs** can't be exported.
+- **Gen 8 and 9 Pokémon** (and Galarian, Hisuian and Paldean forms) become `.pk8` files for Sword/Shield, or `.pk9` files for Scarlet/Violet if they're only in that game. Moves the game doesn't have are dropped.
+- **Hack-only Pokémon and forms**, Pokémon that are in neither Sword/Shield nor Scarlet/Violet, and **eggs** can't be exported.
 
 ## ⚠️ Legality
 
