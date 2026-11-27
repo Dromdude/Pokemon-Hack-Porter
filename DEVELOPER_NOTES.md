@@ -122,6 +122,7 @@ Version string: `VERSION` in the source. Publish a GitHub release with the tag (
 Only once a hack's ROM reads correctly (it must pass the safety check and the checks from saves). Goal: genders and levels right without loading the ROM. Nick runs `tools/rom_data_export.py` on each hack ROM and sends the CSVs; only the entries that differ from official data get built into the porter, per hack version (identify the version by the save profile; the CSV header has the ROM size and CRC32). A loaded ROM still takes priority over built-in data.
 
 ## Ideas not done yet
+- **Hack-only forms (planned, on hold):** flag Pokémon whose form only exists in the hack, with a note like "Ice/Dark form only exists in Odyssey, so it will be a regular Poochyena", and leave them unticked by default. Two cases: forms with their own species number (e.g. likely Lazarus's mythic forms) can be detected from the save; species the hack changed in place (e.g. Odyssey's Ice/Dark Poochyena line, same number as official Poochyena) need a per-hack list from the hack's documentation or ROM data. Optionally save a short report with each export listing lost forms, abilities and moves.
 - Find Lazarus's real species table (checks above).
 - Try Load ROM with the other hacks' real ROMs (`tools/rom_data_export.py` + compare with official data).
 - Gaia ball numbering (needs a save with non-Poké Balls).
