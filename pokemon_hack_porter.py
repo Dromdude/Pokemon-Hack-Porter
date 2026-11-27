@@ -62,7 +62,7 @@ import sys
 import zlib
 
 APP_NAME = "Pokémon Hack Porter"
-VERSION = "1.1"
+VERSION = "1.1.1"
 
 # Reference data: species/move/ability names, official base data and the
 # ROM-hack-to-official ID tables. Built from PKHeX and pokeemerald-expansion
@@ -1461,7 +1461,12 @@ def read_name_table(rom, first, second, rec_len, limit):
 
 BASE_STATS_START = (bytes([45, 49, 49, 45, 65, 65]),      # Bulbasaur  HP Atk Def Spe SpA SpD
                     bytes([60, 62, 63, 60, 80, 80]),      # Ivysaur
-                    bytes([80, 82, 83, 80, 100, 100]))    # Venusaur
+                    (bytes([80, 82, 83, 80, 100, 100]),   # Venusaur, or (if a hack changed it)
+                     bytes([39, 52, 43, 65, 60, 50])))    # Charmander one record later
+MAX_RECORD = 1024      # pokeemerald-expansion records grow with options like following Pokemon
+
+
+STATS_DIAG = []        # what the search saw, shown if it fails (helps fix new hacks)
 
 
 def find_base_stats(rom, idx_to_nat=None):
@@ -1472,12 +1477,16 @@ def find_base_stats(rom, idx_to_nat=None):
     positions of the two values by matching official data for many Pokemon."""
     bulba, ivy, venu = BASE_STATS_START
     found = []
+    del STATS_DIAG[:]
+    STATS_DIAG.append("size %d, Bulbasaur x%d" % (len(rom), rom.count(bulba)))
     pos = rom.find(bulba)
     while pos != -1:
-        for stride in range(24, 257):
+        for stride in range(24, MAX_RECORD + 1):
             if rom[pos + stride: pos + stride + 6] == ivy and \
-                    rom[pos + 2 * stride: pos + 2 * stride + 6] == venu:
+                    (rom[pos + 2 * stride: pos + 2 * stride + 6] == venu[0] or
+                     rom[pos + 3 * stride: pos + 3 * stride + 6] == venu[1]):
                 start = pos - stride
+                STATS_DIAG.append("table %X/%d" % (start, stride))
                 table = _read_stats_table(rom, start, stride, idx_to_nat)
                 if table:
                     # hacks that enlarge the table often leave the old copy behind, unused:
@@ -1499,7 +1508,8 @@ def _read_stats_table(rom, start, stride, idx_to_nat):
             scores.append((hits, k))
         scores.sort(reverse=True)
         (hits, k), (second, _) = scores[0], scores[1]
-        if hits < 0.7 * len(pairs) or second > 0.5 * len(pairs):
+        STATS_DIAG.append("%s %d:%d/%d/%d" % ("gr"[field], k, hits, second, len(pairs)))
+        if hits < 0.7 * len(pairs) or hits - second < 0.2 * len(pairs):
             return None
         best[field] = k
     g, r = best[0], best[1]
@@ -1535,7 +1545,8 @@ class RomTables:
         self.stats = find_base_stats(rom, self.species if (need_names and sp) else None)
         if (need_names and not sp) or not (sp or self.stats):
             raise ExportError("Couldn't find the Pokémon data in this file.\n"
-                              "Make sure it's the patched ROM (.gba) of the hack you're playing.")
+                              "Make sure it's the patched ROM (.gba) of the hack you're playing.\n\n"
+                              "Details (for a bug report): " + "; ".join(STATS_DIAG[:8]))
         parts = []
         if need_names:
             parts.append("%d Pokémon names and %d move names" % (len(sp), len(mv or [])))
