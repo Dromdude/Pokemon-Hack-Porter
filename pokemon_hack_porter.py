@@ -56,13 +56,14 @@ import base64
 import datetime
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
 import zlib
 
 APP_NAME = "Pokémon Hack Porter"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 # Reference data: species/move/ability names, official base data and the
 # ROM-hack-to-official ID tables. Built from PKHeX and pokeemerald-expansion
@@ -1467,18 +1468,143 @@ MAX_RECORD = 1024      # pokeemerald-expansion records grow with options like fo
 
 
 STATS_DIAG = []        # what the search saw, shown if it fails (helps fix new hacks)
+# Gender ratios of Sandslash, the Nidoran families and Clefairy (#28-#35), which hacks
+# don't change: 50/50, three always-female, three always-male, 75% female.
+NIDO_GENDERS = (127, 254, 254, 254, 0, 0, 0, 191)
 
 
 def find_base_stats(rom, idx_to_nat=None):
-    """Find the hack's species data table (base stats, gender odds, level-up rate)
-    and return {hack species number: (gender ratio, growth rate)}, or None.
-    Works for the original Gen 3 layout and for pokeemerald-expansion's bigger
-    records: the record size is found from Bulbasaur/Ivysaur/Venusaur, and the
-    positions of the two values by matching official data for many Pokemon."""
-    bulba, ivy, venu = BASE_STATS_START
-    found = []
+    """Find the hack's species data table and return
+    {hack species number: (gender ratio, growth rate)}, or None.
+    The table is found from the gender ratios of Pokemon #28-#35 (see NIDO_GENDERS),
+    which sit one record apart; the record size comes from that, and where the
+    growth rate is stored is worked out by matching official data. A search based
+    on Bulbasaur's base stats is the fallback."""
     del STATS_DIAG[:]
-    STATS_DIAG.append("size %d, Bulbasaur x%d" % (len(rom), rom.count(bulba)))
+    STATS_DIAG.append("size %d" % len(rom))
+    found = _find_by_nidoran(rom, idx_to_nat) + _find_by_bulbasaur(rom, idx_to_nat)
+    if not found:
+        found = _find_by_names(rom, idx_to_nat)
+    return max(found, key=lambda f: f[:2])[2] if found else None
+
+
+def _learn_field(rom, base, stride, pairs, field, offsets):
+    """Find the byte (offset from base) that behaves like the official gender
+    ratio (field 0) or growth rate (field 1) whatever its encoding: Pokemon with
+    the same official value share one value there, different ones differ.
+    -> (offset, {stored value: official value}) or None."""
+    from collections import Counter
+    results = []
+    for k in offsets:
+        by_official = {}
+        for i, n in pairs:
+            by_official.setdefault(UU[n][field], Counter())[rom[base + i * stride + k]] += 1
+        if len(by_official) < 4:
+            continue
+        top = {off: c.most_common(1)[0] for off, c in by_official.items()}
+        consistent = sum(cnt for _, cnt in top.values())
+        values = [v for v, _ in top.values()]
+        if len(set(values)) != len(values):       # two official values stored the same way
+            continue
+        results.append((consistent, k, {v: off for off, (v, _) in top.items()}))
+    results.sort(key=lambda r: -r[0])
+    if not results:
+        STATS_DIAG.append("%s none" % "gr"[field])
+        return None
+    best = results[0]
+    second = results[1][0] if len(results) > 1 else 0
+    STATS_DIAG.append("%s %d:%d/%d/%d" % ("gr"[field], best[1], best[0], second, len(pairs)))
+    if best[0] < 0.85 * len(pairs) or best[0] - second < 0.1 * len(pairs):
+        return None
+    return best[1], best[2]
+
+
+def _find_by_names(rom, idx_to_nat):
+    """pokeemerald-expansion keeps each Pokemon's name inside its record, so the
+    distance between "Bulbasaur", "Ivysaur" and "Venusaur" is the record size."""
+    out = []
+    for case in (str, str.upper):
+        names = [g3_encode(case(n), len(n)) + b"\xFF" for n in ("Bulbasaur", "Ivysaur", "Venusaur")]
+        STATS_DIAG.append("%s x%d" % ("Bulbasaur" if case is str else "BULBASAUR", rom.count(names[0])))
+        pos = rom.find(names[0])
+        while pos != -1:
+            for stride in range(24, MAX_RECORD + 1):
+                if rom[pos + stride: pos + stride + len(names[1])] == names[1] and \
+                        rom[pos + 2 * stride: pos + 2 * stride + len(names[2])] == names[2]:
+                    base = pos - stride            # name position of record 0
+                    STATS_DIAG.append("names %X/%d" % (base, stride))
+                    table = _learned_table(rom, base, stride, idx_to_nat)
+                    if table:
+                        out.append((True, len(table), table))
+            pos = rom.find(names[0], pos + 1)
+    return out
+
+
+def _learned_table(rom, base, stride, idx_to_nat):
+    pairs = [(i, (idx_to_nat or {}).get(i, i if not idx_to_nat else None)) for i in range(1, 252)]
+    pairs = [(i, n) for i, n in pairs if n and n <= 809]
+    lo = max(-stride + 1, -base)
+    if base + 253 * stride > len(rom):
+        return None
+    offsets = [k for k in range(lo, stride) if not 0 <= k < 13]      # skip the name itself
+    g = _learn_field(rom, base, stride, pairs, 0, offsets)
+    r = _learn_field(rom, base, stride, pairs, 1, offsets)
+    if not g or not r:
+        return None
+    (gk, gmap), (rk, rmap) = g, r
+    table = {}
+    for i in range(1, 3000):
+        o = base + i * stride
+        if o + max(gk, rk) >= len(rom) or o + min(gk, rk) < 0:
+            break
+        gv, rv = rom[o + gk], rom[o + rk]
+        name = rom[o:o + 13]
+        named = 0xBB <= name[0] <= 0xEE and 0xFF in name          # a real record has a name
+        if named and rv in rmap and gv in gmap:
+            table[i] = (gmap[gv], rmap[rv])
+    return table
+
+
+def _nat_index(idx_to_nat, nat):
+    if not idx_to_nat:
+        return nat
+    hits = [i for i, n in idx_to_nat.items() if n == nat]
+    return hits[0] if hits else None
+
+
+def _find_by_nidoran(rom, idx_to_nat):
+    first = _nat_index(idx_to_nat, 28)
+    if first is None or [_nat_index(idx_to_nat, n) for n in range(28, 36)] != list(range(first, first + 8)):
+        return []
+    import bisect
+    fem = [m.start() for m in re.finditer(b"\xFE", rom)]
+    hits, out, triples = 0, [], {}
+    for a, p in enumerate(fem):                       # p = Nidoran-F's gender byte
+        for q in fem[a + 1: bisect.bisect_right(fem, p + MAX_RECORD, a + 1)]:
+            stride = q - p
+            if stride < 24 or p - stride < 0 or p + 6 * stride >= len(rom):
+                continue
+            if rom[p + 2 * stride] == 0xFE:
+                triples[stride] = triples.get(stride, 0) + 1
+            if any(rom[p + (k - 1) * stride] != g for k, g in enumerate(NIDO_GENDERS)):
+                continue
+            hits += 1
+            g0 = p - (first + 1) * stride             # gender byte of record 0
+            STATS_DIAG.append("nido %X/%d" % (g0, stride))
+            table = _read_stats_table(rom, g0, stride, idx_to_nat, gender_at=0)
+            if table:
+                used = any(struct.pack("<I", 0x08000000 + g0 - k) in rom for k in range(0, 0x40))
+                out.append((used, len(table), table))
+    top = sorted(triples.items(), key=lambda kv: -kv[1])[:3]
+    STATS_DIAG.insert(1, "FE x%d, nido x%d, FE3 %s" % (len(fem), hits,
+                                                      " ".join("%d:%d" % kv for kv in top) or "-"))
+    return out
+
+
+def _find_by_bulbasaur(rom, idx_to_nat):
+    bulba, ivy, venu = BASE_STATS_START
+    STATS_DIAG.append("stats x%d" % rom.count(bulba))
+    out = []
     pos = rom.find(bulba)
     while pos != -1:
         for stride in range(24, MAX_RECORD + 1):
@@ -1492,18 +1618,29 @@ def find_base_stats(rom, idx_to_nat=None):
                     # hacks that enlarge the table often leave the old copy behind, unused:
                     # prefer a table the game's code points to, then the biggest one
                     used = struct.pack("<I", 0x08000000 + start) in rom
-                    found.append((used, len(table), table))
+                    out.append((used, len(table), table))
         pos = rom.find(bulba, pos + 1)
-    return max(found, key=lambda f: f[:2])[2] if found else None
+    return out
 
 
-def _read_stats_table(rom, start, stride, idx_to_nat):
+def _read_stats_table(rom, start, stride, idx_to_nat, gender_at=None):
     pairs = [(i, (idx_to_nat or {}).get(i, i if not idx_to_nat else None)) for i in range(1, 252)]
     pairs = [(i, n) for i, n in pairs if n and n <= 809]
+    if start < 0 or start + 253 * stride > len(rom):
+        return None
     best = {}
     for field in (0, 1):                       # 0 = gender ratio, 1 = growth rate
         scores = []
-        for k in range(6, stride):
+        if gender_at is None:                  # start = record start: try every byte
+            offsets = range(6, stride)
+        elif field == 0:
+            offsets = [gender_at, None]
+        else:                                  # start = gender byte: try bytes around it
+            offsets = range(max(-start, -min(stride - 1, 64)), min(stride, 64))
+        for k in offsets:
+            if k is None:
+                scores.append((0, -999))
+                continue
             hits = sum(1 for i, n in pairs if rom[start + i * stride + k] == UU[n][field])
             scores.append((hits, k))
         scores.sort(reverse=True)
@@ -1517,6 +1654,8 @@ def _read_stats_table(rom, start, stride, idx_to_nat):
     table = {}
     for i in range(1, min(count, 3000)):
         o = start + i * stride
+        if o + max(g, r) >= len(rom):
+            break
         rate = rom[o + r]
         if rate > 5:                           # past the end of the table
             break
@@ -2225,6 +2364,32 @@ def open_folder(folder):
 
 
 # =============================================================== window (tkinter)
+SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".pokemon_hack_porter.json")
+PALETTES = {
+    False: dict(bg=None, panel="#ffffff", fg="#000000", muted="#666666", blocked="#999999",
+                party="#eef5ff", border="#a0a0a0", select=None),
+    True: dict(bg="#1e1f22", panel="#2b2d31", fg="#e3e3e3", muted="#9a9ca3", blocked="#6f7178",
+               party="#24324a", border="#43454b", select="#3d5a80", button="#383a40",
+               hover="#45474e", heading="#313338"),
+}
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(settings):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f)
+    except OSError:
+        pass
+
+
 def run_gui(initial=None):
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
@@ -2245,16 +2410,24 @@ def run_gui(initial=None):
     root.minsize(760, 480)
     state = {"entries": [], "checked": set(), "path": None, "mons": [], "prof": None}
     keep_balls = tk.BooleanVar(value=False)
+    settings = load_settings()
+    dark = tk.BooleanVar(value=bool(settings.get("dark", False)))
+    style = ttk.Style(root)
+    native_theme = style.theme_use()
+    colors = dict(PALETTES[False])
 
     # --- top bar
     top = ttk.Frame(root, padding=(10, 10, 10, 4))
     top.pack(fill="x")
     ttk.Button(top, text="Open Save…", command=lambda: choose()).pack(side="left")
     rom_btn = ttk.Button(top, text="Load ROM…", command=lambda: choose_rom())
-    file_lbl = ttk.Label(top, text="No save loaded", foreground="#666")
+    file_lbl = ttk.Label(top, text="No save loaded", style="Muted.TLabel")
     file_lbl.pack(side="left", padx=10)
-    rom_lbl = ttk.Label(top, text="", foreground="#666")
-    rom_lbl.pack(side="right")
+    ttk.Checkbutton(top, text="Dark mode", variable=dark,
+                    command=lambda: (apply_theme(), settings.update(dark=dark.get()),
+                                     save_settings(settings))).pack(side="right")
+    rom_lbl = ttk.Label(top, text="", style="Muted.TLabel")
+    rom_lbl.pack(side="right", padx=(0, 14))
 
     # --- list
     mid = ttk.Frame(root, padding=(10, 4))
@@ -2267,8 +2440,6 @@ def run_gui(initial=None):
         tree.heading(c, text=h)
         tree.column(c, width=w, anchor="center" if c in ("sel", "sex", "lv", "fmt", "games") else "w",
                     stretch=c in ("status", "pokemon"))
-    tree.tag_configure("blocked", foreground="#999")
-    tree.tag_configure("party", background="#eef5ff")
     sb = ttk.Scrollbar(mid, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=sb.set)
     tree.pack(side="left", fill="both", expand=True)
@@ -2297,6 +2468,58 @@ def run_gui(initial=None):
     export_btn.pack(side="right")
     count_lbl = ttk.Label(bar, text="")
     count_lbl.pack(side="right", padx=10)
+
+    def apply_theme():
+        """Switch between the system look and the dark skin."""
+        on = dark.get()
+        colors.clear()
+        colors.update(PALETTES[on])
+        c = colors
+        if on:
+            style.theme_use("clam")
+            style.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["panel"],
+                            bordercolor=c["border"], lightcolor=c["border"], darkcolor=c["border"],
+                            troughcolor=c["bg"], focuscolor=c["select"], selectbackground=c["select"],
+                            selectforeground="#ffffff", insertcolor=c["fg"])
+            style.configure("TButton", background=c["button"], foreground=c["fg"], padding=(8, 3))
+            style.map("TButton", background=[("disabled", c["bg"]), ("active", c["hover"])],
+                      foreground=[("disabled", c["blocked"])])
+            style.configure("TCheckbutton", background=c["bg"], foreground=c["fg"],
+                            indicatorbackground=c["panel"], indicatorforeground=c["fg"])
+            style.map("TCheckbutton", background=[("active", c["bg"])],
+                      indicatorbackground=[("selected", c["select"]), ("active", c["hover"])])
+            style.configure("Treeview", background=c["panel"], fieldbackground=c["panel"],
+                            foreground=c["fg"], bordercolor=c["border"])
+            style.map("Treeview", background=[("selected", c["select"])],
+                      foreground=[("selected", "#ffffff")])
+            style.configure("Treeview.Heading", background=c["heading"], foreground=c["fg"],
+                            relief="flat")
+            style.map("Treeview.Heading", background=[("active", c["hover"])])
+            style.configure("Vertical.TScrollbar", background=c["button"], troughcolor=c["bg"],
+                            arrowcolor=c["fg"], bordercolor=c["bg"])
+            style.map("Vertical.TScrollbar", background=[("active", c["hover"])])
+            root.configure(bg=c["bg"])
+        else:
+            style.theme_use(native_theme)
+            root.configure(bg=style.lookup("TFrame", "background") or "SystemButtonFace")
+        style.configure("Muted.TLabel", foreground=c["muted"])
+        tree.tag_configure("blocked", foreground=c["blocked"])
+        tree.tag_configure("party", background=c["party"])
+        details.configure(bg=c["panel"], fg=c["fg"], insertbackground=c["fg"],
+                          highlightbackground=c["border"], highlightcolor=c["border"],
+                          relief="solid" if not on else "flat",
+                          highlightthickness=0 if not on else 1)
+        if sys.platform == "win32":     # dark title bar on Windows 10/11
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+                value = ctypes.c_int(1 if on else 0)
+                for attr in (20, 19):
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(value), 4)
+                root.withdraw()
+                root.deiconify()
+            except Exception:
+                pass
 
     def show_details(text):
         details.configure(state="normal")
@@ -2364,6 +2587,8 @@ def run_gui(initial=None):
     def pick(profiles):
         """Ask which hack a save is from, when the save alone can't tell."""
         win = tk.Toplevel(root)
+        if colors["bg"]:
+            win.configure(bg=colors["bg"])
         win.title(APP_NAME)
         win.transient(root)
         win.grab_set()
@@ -2390,7 +2615,7 @@ def run_gui(initial=None):
         state["entries"] = entries = make_entries()
         render()
         file_lbl.configure(text="%s   ·   %s   ·   Trainer %s   ·   %d Pokémon" % (
-            os.path.basename(path), prof.name, trainer, len(entries)), foreground="#000")
+            os.path.basename(path), prof.name, trainer, len(entries)), style="TLabel")
         select("party")
         msg = ("Loaded %d Pokémon. Party Pokémon are ticked; tick any box Pokémon you also want.\n"
                "\"Can go to\" shows the oldest game generation each Pokémon can be moved into."
@@ -2465,6 +2690,7 @@ def run_gui(initial=None):
                                % (len(written), folder)):
             open_folder(folder)
 
+    apply_theme()
     refresh()
     if initial:
         root.after(100, lambda: load(initial))
