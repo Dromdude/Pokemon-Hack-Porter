@@ -15,6 +15,17 @@ for rom, save in cases:
     print(r.stdout.strip().split('\n')[-1])
     if r.returncode:
         print(r.stdout); fails += 1
+# The real Lazarus v2.0 ROM read by 1.1.3's _find_lazarus (tools/rom_data_export.py output):
+# mostly misread, so the safety check must reject it.
+import importlib.util
+spec = importlib.util.spec_from_file_location('php', os.path.join(root, 'pokemon_hack_porter.py'))
+php = importlib.util.module_from_spec(spec); spec.loader.exec_module(php)
+rows = [l.split(',') for l in open(os.path.join(here, 'data', 'lazarus_v2.0_misread_romdata.csv'))
+        if l[0].isdigit()]
+agree, total = php.stats_agreement({int(r[0]): (int(r[2]), int(r[3])) for r in rows})
+ok = agree < 0.75 * total
+print('== misread Lazarus data: %d of %d agree -> %s' % (agree, total, 'rejected (ok)' if ok else 'ACCEPTED (FAIL)'))
+fails += not ok
 for f in os.listdir(tmp):
     os.remove(os.path.join(tmp, f))
 os.rmdir(tmp)
