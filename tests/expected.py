@@ -57,4 +57,4 @@ HACK_ONLY = {
 }
 
 # Without the hack's ROM these can't match (the save alone doesn't say). With the ROM loaded they must.
-NEEDS_ROM = {("light_platinum.sav", "BOX1, slot 2", "level"), ("lazarus.sav", "Party 4", "gender")}
+NEEDS_ROM = {("light_platinum.sav", "BOX1, slot 2", "level")}   # Lazarus Fennekin: built-in since 1.2

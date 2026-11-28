@@ -81,6 +81,8 @@ Hacks can change a species' gender ratio and growth rate; the save doesn't say w
 
 **Manual switches (v1.2, the main fix):** in the window, clicking a row's ♂/♀ flips its gender and clicking Lv asks for the level the game shows (`Entry(..., gender=, level=)`; text mode `--set-gender "Party 4=F"`, `--set-level "BOX1, slot 2=5"`). Changed values show `*` and a note. This works for every hack without any ROM data; Load ROM is a bonus where it works.
 
+**Known gender changes and "?" (v1.2):** `Profile.known_genders` holds gender ratios confirmed from real saves (Lazarus: Fennekin line 653–655 = 127, since a female Fennekin with personality byte 58 is impossible at the official 31). `Profile.check_genders = True` (Lazarus) marks every other mixed-ratio gender with `?` when no ROM data is loaded, telling the user to compare with the game. Add a species to `known_genders` whenever a mismatch is confirmed in-game.
+
 **Safety check (v1.2):** `stats_agreement()` compares the ROM data with official gender ratio + growth rate for Pokémon #1–251. A real hack changes a few; if fewer than 75% match (or fewer than 50 can be compared), `RomTables` rejects the data (`self.rejected`) and says so, instead of producing wrong genders/levels. `RomTables` → `find_base_stats()` looks for the hack's species table and returns `{hack species ID: (gender ratio, growth rate)}`. `_plan()` then keeps the hack's level (adjusting EXP to the official curve) and gender (stored directly in `.pk6`+; in `.pk3` the PID is re-rolled by `reroll_pid()` keeping nature and shininess).
 
 Search methods, in order (`STATS_DIAG` collects what each saw; shown in the error and by `tests/check_saves.py`):

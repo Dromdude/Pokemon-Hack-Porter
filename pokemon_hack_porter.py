@@ -1237,6 +1237,11 @@ class Profile:
     custom_abilities = False   # True if the hack is known to change species' abilities
     needs_rom = False          # True if the hack's ROM helps identify Pokemon
     rom = None
+    # Gender ratios this hack is known to change {hack species number: ratio}, confirmed
+    # from real saves; and whether genders should be checked against the game when
+    # the hack's own data isn't available (the hack changes gender odds we can't read).
+    known_genders = {}
+    check_genders = False
 
     def detect(self, save):
         """Return True if the save looks like it belongs to this hack."""
@@ -1353,6 +1358,10 @@ class ExpansionProfile(Profile):
 
 class LazarusProfile(ExpansionProfile):
     name, short = "Pokémon Lazarus (v2.0)", "Lazarus"
+    # Fennekin is female in-game with personality byte 58, so Lazarus raised its ratio
+    # (official 31); 50/50 assumed, and for its evolutions too.
+    known_genders = {653: 127, 654: 127, 655: 127}
+    check_genders = True
 
 
 class ImperiumProfile(ExpansionProfile):
@@ -2045,6 +2054,7 @@ class Entry:
         self.where, self.party, self.m, self.profile = where, party, mon, profile
         self.keep_balls = keep_balls
         self.set_gender, self.set_level = gender, level      # set by the user to match the game
+        self.gender_unsure = False
         self.notes, self.blocker = [], None
         self.format = None
         self._plan()
@@ -2136,6 +2146,12 @@ class Entry:
         if self.level is None and hack:
             self.level = level_for_exp(hack[1], m["exp"])
         self.hack_gender = gender_from_ratio(m["pid"], hack[0]) if hack else None
+        known = prof.known_genders.get(m["species_id"])
+        if self.hack_gender is None and known is not None:
+            self.hack_gender = gender_from_ratio(m["pid"], known)
+        # gender we can't be sure of: the hack changes gender odds and we don't have its data
+        self.gender_unsure = bool(prof.check_genders and not hack and known is None
+                                  and self.set_gender is None)
         if self.set_level:
             self.level = self.set_level
             self.notes.append("level set to %d by you" % self.level)
@@ -2168,6 +2184,7 @@ class Entry:
         self.pid = m["pid"]
         ratio = UU[nat][0] if self.format == 3 else official[0]
         self.gender = gender_from_ratio(self.pid, ratio)
+        self.gender_unsure = self.gender_unsure and ratio not in (0, 254, 255)
         want = self.hack_gender
         if want is not None and want != self.gender:
             sexes = ("male", "female", "genderless")
@@ -2252,8 +2269,13 @@ class Entry:
         if hasattr(self, "moves"):
             sex = getattr(self, "gender", getattr(self, "hack_gender", None))
             lines.append("Lv. %s   %s   %s nature   %s" % (
-                self.level or "?", {0: "♂", 1: "♀", 2: "genderless"}.get(sex, ""), NATURES[m["pid"] % 25],
+                self.level or "?", {0: "♂", 1: "♀", 2: "genderless"}.get(sex, "")
+                + ("?" if self.exportable and self.gender_unsure else ""), NATURES[m["pid"] % 25],
                 ABILITIES[self.ability] if self.ability else ""))
+            if self.exportable and self.gender_unsure:
+                lines.append("? %s can change gender odds, so this gender may not match the game. "
+                             "Check its summary screen and click ♂/♀ to change it if needed."
+                             % self.profile.short)
             lines.append("Moves: " + (", ".join(MOVES[x] for x in self.moves) or "none"))
             st = ["HP", "Atk", "Def", "Spe", "SpA", "SpD"]
             lines.append("IVs: " + "  ".join("%s %d" % (s, v) for s, v in zip(st, m["ivs"])))
@@ -2632,7 +2654,8 @@ def run_gui(initial=None):
             sex = getattr(e, "gender", getattr(e, "hack_gender", None))
             mark = lambda changed: "*" if changed else ""
             tree.insert("", "end", iid=str(idx), tags=tags, values=(
-                "", e.where, name, {0: "♂", 1: "♀"}.get(sex, "") + mark(e.set_gender is not None),
+                "", e.where, name, {0: "♂", 1: "♀"}.get(sex, "") + mark(e.set_gender is not None)
+                + ("?" if e.exportable and e.gender_unsure else ""),
                 ("%s%s" % (e.level, mark(e.set_level))) if e.level else "", NATURES[e.m["pid"] % 25] if e.m["checksum_ok"] and not e.m["egg"] else "",
                 ABILITIES[e.ability] if getattr(e, "ability", None) else "",
                 "Gen %d+" % e.min_gen if e.format else "",
@@ -2711,6 +2734,10 @@ def run_gui(initial=None):
             msg += ("\n\n%s reuses Pokémon numbers, so the program needs the hack's ROM to identify "
                     "every Pokémon reliably. Click \"Load ROM…\" and pick your %s .gba file "
                     "(it's only read, never changed)." % (prof.short, prof.short))
+        elif prof.check_genders and not prof.rom:
+            msg += ("\n\n%s can change gender odds, and the save doesn't say which, so genders marked "
+                    "with ? may not match the game. Compare them with each Pokémon's summary screen "
+                    "and click ♂/♀ to change any that differ." % prof.short)
         elif not prof.rom:
             msg += ("\n\nTip: click \"Load ROM…\" and pick your %s .gba file. Hacks can change a "
                     "Pokémon's gender odds and level-up speed; with the ROM loaded, genders and levels "
@@ -2838,6 +2865,10 @@ def run_text(path, boxes, out, keep_balls=False, rom=None, hack=None, set_gender
     elif prof.needs_rom:
         print("Tip: %s reuses Pokémon numbers. Add --rom \"your hack.gba\" so every Pokémon can\n"
               "be identified reliably.\n" % prof.short)
+    elif prof.check_genders:
+        print("Note: %s can change gender odds. Genders marked ? may not match the game; compare them\n"
+              "with the summary screens and use --set-gender \"WHERE=F\" to change any that differ.\n"
+              % prof.short)
     else:
         print("Tip: add --rom \"your hack.gba\" so genders and levels match the hack exactly.\n")
     genders = {}

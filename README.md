@@ -4,7 +4,7 @@
 
 Open a save from a supported ROM hack, tick the Pokémon you want from your party and PC boxes, and export them as `.pk3`, `.pk6`, `.pk7`, `.pk8` or `.pk9` files. Your save file is only read, never changed.
 
-> **AI disclaimer:** This program, including its code and this description, was made entirely with AI (Anthropic's Claude). It has been tested on real save files, but it may contain mistakes. Back up your saves, and please report anything that looks wrong.
+> **AI disclaimer:** This program, including its code and this description, was made entirely with AI (Anthropic's Claude, with help from xAI's Grok). It has been tested on real save files, but it may contain mistakes. Back up your saves, and please report anything that looks wrong.
 
 ![Pokémon Hack Porter with a Lazarus save open](docs/screenshot.png)
 
@@ -12,16 +12,16 @@ Open a save from a supported ROM hack, tick the Pokémon you want from your part
 
 ## Supported ROM hacks
 
-| ROM hack | Party | PC boxes | Notes |
-|---|---|---|---|
-| Pokémon Lazarus (v2.0) | ✅ | ✅ | |
-| Pokémon Emerald Imperium (v1.3) | ✅ | ✅ | |
-| Pokémon Unbound (v2.1) | ✅ | ✅ | |
-| Pokémon Odyssey (v4.1) | ✅ | ✅ | |
-| Pokémon Gaia (v3.2) | ✅ | ✅ | Poké Balls are exported as regular Poké Balls |
-| Pokémon Light Platinum | ✅ | ✅ | Load the hack's ROM to identify every Pokémon |
+| ROM hack | Testing | Party | PC boxes | Notes |
+|---|---|---|---|---|
+| Pokémon Lazarus (v2.0) | **Extensive** | ✅ | ✅ | Check genders marked **?** against the game |
+| Pokémon Emerald Imperium (v1.3) | Light | ✅ | ✅ | |
+| Pokémon Unbound (v2.1) | Light | ✅ | ✅ | |
+| Pokémon Odyssey (v4.1) | Light | ✅ | ✅ | |
+| Pokémon Gaia (v3.2) | Light | ✅ | ✅ | Poké Balls are exported as regular Poké Balls |
+| Pokémon Light Platinum | Light | ✅ | ✅ | Load the hack's ROM to identify every Pokémon |
 
-**Testing has been limited.** For each hack, I only played long enough to catch a few Pokémon to put in the party and PC boxes, then checked that the program read them correctly. Things that only appear later in a game — rare forms, late-game moves, special events — haven't been checked. Other versions of these hacks may work but haven't been tested.
+**Lazarus has had extensive testing:** saves from different points in my playthrough, with the Pokémon checked against their in-game summary screens, and automatic re-checks against those screens after every update. **The other hacks have only had a little testing:** I played long enough to catch a few Pokémon for the party and PC boxes, then checked that the program read them correctly. Things that only appear later in a game — rare forms, late-game moves, special events — haven't been checked. Other versions of these hacks may work but haven't been tested.
 
 ## Help expand and test it
 
@@ -43,10 +43,10 @@ You can also run `pokemon_hack_porter.py` directly with Python 3.8+.
 
 1. Click **Open Save…** and pick your `.sav` file.
 2. Tick the Pokémon you want (party Pokémon are ticked automatically). Click a row to see its details.
-3. Check each Pokémon's gender (♂/♀) and level (Lv) against the game. If one doesn't match, click it to change it (see below).
+3. Check each Pokémon's gender (♂/♀) and level (Lv) against its summary screen in the game, especially genders marked **?**. If one doesn't match, click it to change it (see below).
 4. Click **Export Selected…** and choose a folder.
 
-**Why a gender or level might not match:** hacks can change a Pokémon's gender odds and how fast it levels up, and the save file alone doesn't say which. Without that information the program uses the official games' rules, so a Pokémon can come out as the other gender or, if it's in a box, a level lower. Click the ♂/♀ to flip it, or the level to type the one the game shows; changed values get a `*`. For `.pk3` files, the program adjusts the Pokémon's personality value to match the gender, keeping its nature and shininess.
+**Why a gender or level might not match:** hacks can change a Pokémon's gender odds and how fast it levels up, and the save file alone doesn't say which. Without that information the program uses the official games' rules, so a Pokémon can come out as the other gender or, if it's in a box, a level lower. For hacks known to change gender odds (like Lazarus), genders the program can't confirm are marked **?**; changes already confirmed (like Lazarus's Fennekin line) are applied automatically. Click the ♂/♀ to flip it, or the level to type the one the game shows; changed values get a `*`. For `.pk3` files, the program adjusts the Pokémon's personality value to match the gender, keeping its nature and shininess.
 
 **Load ROM… (optional):** for some hacks, the program can read the gender odds and level-up speeds from the hack's `.gba` file and fix these automatically. If the data it finds doesn't look right, it ignores it and tells you. For Light Platinum, the ROM is also needed to identify Pokémon. The ROM is only read, never changed.
 
